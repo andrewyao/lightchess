@@ -1,0 +1,19 @@
+{
+  "name": "lightchess",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Replay chess.com games locally, with move-by-move analysis from Claude.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.30.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "config": {
+    "port": 8765
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "test": "node --test",
+    "fetch": "node fetch-game.js"
+  }
+}

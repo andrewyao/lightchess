@@ -1,0 +1,5 @@
+node_modules/
+# Downloaded games are local data; the app fetches them again on demand.
+games/
+.playwright-mcp/
+.DS_Store

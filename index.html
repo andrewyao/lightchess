@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightChess Replay</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #302e2b;
+    --panel: #262522;
+    --panel-2: #2f2d2a;
+    --text: #e8e6e3;
+    --muted: #9c9a96;
+    --light: #ebecd0;
+    --dark: #739552;
+    --light-hl: #f5f682;
+    --dark-hl: #b9ca43;
+    --accent: #81b64c;
+    --best: #81b64c;
+    --good: #96bc4b;
+    --inaccuracy: #f7c631;
+    --mistake: #e58f2a;
+    --blunder: #ca3431;
+    /* Space taken by the player rows, controls and hint around the board. */
+    --board-chrome: 76px;
+    --analysis-min: 340px;
+    --moves-width: 320px;
+    --board: min(100dvh - 32px - var(--board-chrome), 100vw - 64px - var(--analysis-min) - var(--moves-width));
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    display: flex;
+    gap: 16px;
+    height: 100dvh;
+    padding: 16px;
+    justify-content: center;
+  }
+  h1 { font-size: 17px; margin: 0 0 4px; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0; }
+  a { color: var(--accent); }
+
+  /* Board */
+  .board-wrap { width: var(--board); flex: none; }
+  .player { display: flex; justify-content: space-between; padding: 6px 2px; font-weight: 600; }
+  .player .result { color: var(--muted); font-weight: 400; }
+  .elo { color: var(--muted); font-weight: 400; }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    grid-template-rows: repeat(8, minmax(0, 1fr));
+    width: var(--board);
+    height: var(--board);
+    border-radius: 4px;
+    overflow: hidden;
+    user-select: none;
+  }
+  .sq {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: calc(var(--board) / 8 * 0.8);
+    line-height: 1;
+  }
+  .sq.light { background: var(--light); }
+  .sq.dark { background: var(--dark); }
+  .sq.light.hl { background: var(--light-hl); }
+  .sq.dark.hl { background: var(--dark-hl); }
+  .sq.check { background: radial-gradient(circle, #ff3b30 0%, #e0282080 45%, transparent 75%), var(--dark); }
+  .sq.light.check { background: radial-gradient(circle, #ff3b30 0%, #e0282080 45%, transparent 75%), var(--light); }
+  .piece { font-family: "Segoe UI Symbol", "Apple Symbols", "DejaVu Sans", serif; transform: translateY(-3%); }
+  .piece.w { color: #fff; text-shadow: 0 0 1px #000, 0 0 1px #000, 0 1px 1px #000; }
+  .piece.b { color: #262421; text-shadow: 0 0 1px #fff8; }
+  .coord { position: absolute; font-size: calc(var(--board) / 8 * 0.18); font-weight: 700; }
+  .coord.rank { top: 3%; left: 5%; }
+  .coord.file { bottom: 2%; right: 6%; }
+  .sq.light .coord { color: var(--dark); }
+  .sq.dark .coord { color: var(--light); }
+
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 0;
+    border-radius: 4px;
+    padding: 10px 0;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  button:hover { background: #3c3a37; }
+  button:focus-visible { outline: 2px solid var(--accent); }
+
+  /* Columns: board | analysis | game info + moves + controls */
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .col-analysis { flex: 1; min-width: var(--analysis-min); max-width: 560px; }
+  .col-moves { flex: none; width: var(--moves-width); }
+  .card { background: var(--panel); border-radius: 6px; padding: 12px 14px; }
+  .analysis { flex: 1; overflow-y: auto; }
+  .analysis h2 { font-size: 14px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
+  .analysis p { margin: 0 0 8px; }
+  .alt { border-left: 3px solid var(--best); background: #81b64c14; padding: 8px 10px; border-radius: 0 4px 4px 0; margin-bottom: 8px; }
+  .alt-head { color: var(--best); margin-bottom: 6px; font-weight: 600; }
+  .alt-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .alt-line .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 4px; }
+  .alt-line .mvb { margin: 0; }
+
+  /* Moves and squares inside analysis text */
+  .mvb {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.86em;
+    font-weight: 600;
+    color: #fff;
+    background: #ffffff12;
+    border: 1px solid #ffffff26;
+    border-radius: 4px;
+    padding: 0 5px;
+    margin: 0 1px;
+    white-space: nowrap;
+  }
+  .mvb[data-ply] { cursor: pointer; border-color: #81b64c80; }
+  .mvb[data-ply]:hover { background: #81b64c33; }
+  .mvb-lg { font-size: 0.95em; padding: 1px 7px; }
+  .mvb-best { color: var(--best); background: #81b64c1f; border-color: #81b64c80; }
+  .sqb { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.9em; color: #f0d9a8; }
+  .moments { list-style: none; padding: 0 !important; }
+  .moments li { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; padding: 6px 0; border-top: 1px solid #ffffff0d; }
+  .moments li .mvb { justify-self: start; }
+  button.primary { background: var(--accent); color: #fff; font-weight: 700; padding: 10px 16px; width: 100%; }
+  button.primary:hover { background: #95c95e; }
+  .error { color: #ff8a80; }
+  .cache-note { color: var(--muted); font-size: 12px; margin-top: 10px !important; }
+  .spinner {
+    display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -1px;
+    border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .alt p:last-child { margin-bottom: 0; }
+  .analysis ul { margin: 0; padding-left: 18px; }
+  .analysis li { margin-bottom: 4px; cursor: pointer; }
+  .analysis li:hover { color: #fff; }
+  .muted { color: var(--muted); }
+  code { background: #0004; padding: 1px 5px; border-radius: 3px; }
+
+  .tag { font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; color: #111; }
+  .tag-best { background: var(--best); }
+  .tag-good { background: var(--good); }
+  .tag-inaccuracy { background: var(--inaccuracy); }
+  .tag-mistake { background: var(--mistake); }
+  .tag-blunder { background: var(--blunder); color: #fff; }
+
+  /* Review panel, modelled on chess.com's: moves, review summary, navigation. */
+  .game-card-head { display: flex; align-items: flex-start; gap: 8px; }
+  .game-card-head h1 { flex: 1; }
+  .icon-btn { padding: 3px 8px; font-size: 14px; line-height: 1.2; background: transparent; color: var(--muted); }
+  .icon-btn:hover { color: #fff; }
+  .review { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--panel); border-radius: 6px; overflow: hidden; }
+  .moves { flex: 1; overflow-y: auto; min-height: 160px; padding: 4px 0; }
+  .row { display: grid; grid-template-columns: 40px 1fr 1fr 44px; align-items: center; padding: 0 10px 0 14px; min-height: 30px; }
+  .row:nth-child(even) { background: #ffffff07; }
+  .num { color: var(--muted); font-weight: 600; font-size: 14px; }
+  .mv {
+    justify-self: start; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 3px;
+    cursor: pointer; font-weight: 700; font-size: 15px; color: #d9d8d6;
+  }
+  .mv:hover { background: #ffffff12; }
+  .mv.current { background: #ffffff29; color: #fff; }
+  .fig { font-family: "Segoe UI Symbol", "Apple Symbols", "DejaVu Sans", serif; font-weight: 400; font-size: 1.3em; line-height: 1; }
+  .result-row { padding: 8px 14px; color: var(--muted); font-weight: 700; }
+  .times { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .bar { height: 5px; border-radius: 1px; min-width: 2px; }
+  .bar.w { background: #d9d8d6; }
+  .bar.b { background: #7c7a77; }
+
+  .cls {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 16px; height: 16px; border-radius: 50%; font: 800 9px/1 system-ui, sans-serif; color: #fff; letter-spacing: -0.5px;
+  }
+  .cls-best { background: var(--best); }
+  .cls-good { background: var(--good); }
+  .cls-inaccuracy { background: var(--inaccuracy); }
+  .cls-mistake { background: var(--mistake); }
+  .cls-blunder { background: var(--blunder); }
+
+  .review-foot { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-top: 1px solid #ffffff0d; background: #21201d; }
+  .counts { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; font-weight: 700; font-size: 14px; }
+  .counts:empty { display: none; }
+  .count { display: inline-flex; align-items: center; gap: 6px; }
+  .review-btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 0;
+    background: linear-gradient(#89c053, #6fa33d); color: #fff; font-size: 20px; font-weight: 800;
+    border-radius: 8px; box-shadow: 0 4px 0 #45753c;
+  }
+  .review-btn:hover { background: linear-gradient(#95cb5f, #79ad47); }
+  .review-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #45753c; }
+  .review-btn:disabled { opacity: 0.75; cursor: progress; transform: none; }
+  .review-btn .star {
+    display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+    border-radius: 50%; background: #fff; color: #6fa33d; font-size: 16px;
+  }
+  .review-actions, .nav { display: grid; gap: 8px; }
+  .review-actions { grid-template-columns: 1fr; }
+  .review-actions button { font-size: 20px; padding: 6px 0; }
+  .review-actions button:disabled { opacity: 0.4; cursor: default; }
+  .nav { grid-template-columns: repeat(5, 1fr); }
+  .nav button { font-size: 18px; padding: 10px 0; background: #3a3835; }
+  .nav button:hover { background: #4a4844; }
+
+  .list { max-width: 640px; margin: 40px auto; padding: 0 16px; }
+  .list-head { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 28px 0 4px; }
+  .load-form { display: grid; gap: 8px; margin-top: 12px; }
+  .load-form input {
+    background: #1b1a18; color: var(--text); border: 1px solid #ffffff1f; border-radius: 4px;
+    padding: 9px 10px; font: inherit; font-size: 14px; min-width: 0;
+  }
+  .load-form input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .load-form button:disabled { opacity: 0.6; cursor: progress; }
+  .form-msg { margin: 0; font-size: 13px; min-height: 1em; }
+  .form-msg:empty { display: none; }
+  .load-other .load-form { grid-template-columns: 1fr auto; }
+  .load-other .form-msg { grid-column: 1 / -1; }
+  .back { display: inline-block; font-size: 13px; margin-bottom: 6px; }
+  .game-row { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid #ffffff14; }
+  .game-row a:first-child { flex: 1; border-bottom: 0; }
+  .list .game-row .ext { display: inline; border: 0; padding: 0; font-size: 13px; white-space: nowrap; }
+  .ext-btn {
+    display: inline-block; margin-top: 8px; font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap;
+    color: var(--text); background: var(--panel-2); border: 1px solid #ffffff1f; border-radius: 4px; padding: 5px 10px;
+  }
+  .ext-btn:hover { border-color: var(--accent); color: #fff; }
+  .list a { display: block; padding: 10px 0; border-bottom: 1px solid #ffffff14; text-decoration: none; }
+
+  /* Medium screens: analysis drops below the board and moves. */
+  @media (max-width: 1100px) {
+    /* 100vw includes the page scrollbar, so leave ~20px extra for it. */
+    :root { --board: min(100dvh - 32px - var(--board-chrome), 100vw - 68px - var(--moves-width)); }
+    main { flex-wrap: wrap; height: auto; }
+    .board-wrap, .col-moves { height: calc(var(--board) + var(--board-chrome)); }
+    .col-analysis { order: 3; flex-basis: 100%; max-width: none; min-width: 0; }
+    .analysis { flex: none; }
+  }
+
+  /* Narrow screens: one column, page scrolls. */
+  @media (max-width: 760px) {
+    :root { --board: calc(100vw - 32px); }
+    main { flex-direction: column; flex-wrap: nowrap; }
+    .col-moves { width: auto; height: 70dvh; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script src="lib/chess.js"></script>
+<script>
+'use strict';
+const C = window.LightChess;
+const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const app = document.getElementById('app');
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = resolve;
+    el.onerror = () => reject(new Error(`Could not load ${src}`));
+    document.head.appendChild(el);
+  });
+}
+
+// Move list helpers. White moves get solid piece icons, Black moves outlined
+// ones, as on chess.com.
+const FIGURINES = {
+  w: { K: '♚', Q: '♛', R: '♜', B: '♝', N: '♞' },
+  b: { K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘' },
+};
+const figurineSan = (san, color) => (/^[KQRBN]/.test(san)
+  ? `<span class="fig">${FIGURINES[color][san[0]]}\uFE0E</span>${esc(san.slice(1))}`
+  : esc(san));
+
+const CLASSES = {
+  best: { icon: '★', label: () => 'Best' },
+  good: { icon: '✓', label: () => 'Good' },
+  inaccuracy: { icon: '?!', label: (n) => (n === 1 ? 'Inaccuracy' : 'Inaccuracies') },
+  mistake: { icon: '?', label: (n) => (n === 1 ? 'Mistake' : 'Mistakes') },
+  blunder: { icon: '??', label: (n) => (n === 1 ? 'Blunder' : 'Blunders') },
+};
+const clsIcon = (tag) => (CLASSES[tag] ? `<span class="cls cls-${tag}" title="${tag}">${CLASSES[tag].icon}</span>` : '');
+
+// Seconds spent on each move, from the remaining clocks (tenths of a second)
+// and a "base+increment" time control in seconds, e.g. "900+10".
+function timeSpent(clocks, timeControl) {
+  const tc = String(timeControl || '').match(/^(\d+)(?:\+(\d+))?$/);
+  if (!tc || !clocks.some(Number.isFinite)) return [];
+  const base = Number(tc[1]) * 10;
+  const inc = Number(tc[2] || 0) * 10;
+  return clocks.map((clk, i) => {
+    const before = i < 2 ? base : clocks[i - 2];
+    return Number.isFinite(clk) && Number.isFinite(before) ? Math.max(0, before + inc - clk) / 10 : null;
+  });
+}
+const formatSeconds = (s) => (s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${s.toFixed(1)}s`);
+
+// Analyses cost an LLM call, so keep each one in localStorage for a week.
+const ANALYSIS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const analysisKey = (id) => `lightchess:analysis:${id}`;
+
+function readCachedAnalysis(id) {
+  try {
+    const entry = JSON.parse(localStorage.getItem(analysisKey(id)));
+    if (entry && Date.now() - entry.savedAt < ANALYSIS_TTL_MS) return entry;
+    localStorage.removeItem(analysisKey(id));
+  } catch {}
+  return null;
+}
+
+function cacheAnalysis(id, analysis) {
+  const entry = { savedAt: Date.now(), analysis };
+  try { localStorage.setItem(analysisKey(id), JSON.stringify(entry)); } catch {}
+  return entry;
+}
+
+// Paste a chess.com game id or link to download and open it.
+const chessComUrl = (g) => g.url || `https://www.chess.com/game/live/${g.id}`;
+const withElo = (name, elo) => esc(name) + (elo ? ` <span class="elo">(${esc(elo)})</span>` : '');
+
+function loadFormHtml(gameValue = '') {
+  return `<form class="load-form" autocomplete="off">
+    <input name="game" placeholder="Paste a chess.com game link or ID" value="${esc(gameValue)}" required>
+    <button class="primary" type="submit">Load game</button>
+    <p class="form-msg" role="status"></p>
+  </form>`;
+}
+
+function wireLoadForms(root) {
+  root.querySelectorAll('.load-form').forEach((form) => form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = form.querySelector('.form-msg');
+    const button = form.querySelector('button');
+    const game = form.game.value.trim();
+    button.disabled = true;
+    msg.className = 'form-msg muted';
+    msg.textContent = 'Loading game from chess.com...';
+    try {
+      const res = await fetch('/api/games', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Server returned ${res.status}`);
+      location.href = `?game=${encodeURIComponent(body.id)}`;
+    } catch (err) {
+      msg.className = 'form-msg error';
+      msg.textContent = err.message === 'Failed to fetch' ? 'Could not reach the server. Start it with pnpm dev.' : err.message;
+      button.disabled = false;
+    }
+  }));
+}
+
+async function showGameList() {
+  await loadScript('games/index.js').catch(() => {});
+  const games = window.LIGHTCHESS_INDEX || [];
+  app.innerHTML = `<div class="list"><h1>LightChess</h1>${loadFormHtml()}<h2 class="list-head">Your games</h2>${
+    games.length
+      ? games.map((g) => `<div class="game-row"><a href="?game=${esc(g.id)}">${withElo(g.white, g.whiteElo)} vs ${withElo(g.black, g.blackElo)} · ${esc(g.result)} · <span class="muted">${esc(g.date)} ${esc(g.opening || g.eco || '')}</span></a>`
+        + `<a class="ext" href="${esc(chessComUrl(g))}" target="_blank" rel="noopener" title="Open game ${esc(g.id)} on chess.com">chess.com ↗</a></div>`).join('')
+      : '<p class="muted">No games yet. Paste one above.</p>'
+  }</div>`;
+  wireLoadForms(app);
+}
+
+async function showGame(id) {
+  try {
+    await loadScript(`games/${id}.js`);
+  } catch {
+    // Not downloaded yet: fetch it now through the same form.
+    app.innerHTML = `<div class="list"><h1>LightChess</h1>${loadFormHtml(id)}<a href="?">All games</a></div>`;
+    wireLoadForms(app);
+    app.querySelector('.load-form').requestSubmit();
+    return;
+  }
+  const game = window.LIGHTCHESS_GAMES[id];
+  const { sans, clocks, headers } = C.parsePgn(game.pgn);
+  const { positions, moves } = C.replay({ fen: game.startFen, sans });
+  const spent = timeSpent(clocks, headers.TimeControl || game.timeControl);
+  let cached = readCachedAnalysis(id);
+  let analysis = cached?.analysis;
+  let notes = new Map((analysis?.moves || []).map((m) => [m.ply, m]));
+  let analyzing = false;
+  let analysisError = null;
+  document.title = `${game.white} vs ${game.black}`;
+
+  app.innerHTML = `
+    <main>
+      <section class="board-wrap">
+        <div class="player" id="top"></div>
+        <div class="board" id="board"></div>
+        <div class="player" id="bottom"></div>
+      </section>
+      <section class="col col-analysis">
+        <div class="card analysis" id="analysis"></div>
+      </section>
+      <section class="col col-moves">
+        <div class="card">
+          <a class="back" href="?">← All games</a>
+          <div class="game-card-head">
+            <h1>${withElo(game.white, game.whiteElo)} vs ${withElo(game.black, game.blackElo)}</h1>
+            <button class="icon-btn" data-go="flip" title="Flip board (F)">⇅</button>
+            <button class="icon-btn" data-go="fullscreen" title="Toggle fullscreen">⛶</button>
+          </div>
+          <p class="sub">${esc(game.opening || game.eco || '')} · ${esc(game.date)}</p>
+          <a class="ext-btn" href="${esc(chessComUrl(game))}" target="_blank" rel="noopener">Open game ${esc(id)} on chess.com ↗</a>
+          <div class="load-other">${loadFormHtml()}</div>
+        </div>
+        <div class="review">
+          <div class="moves" id="moves"></div>
+          <div class="review-foot">
+            <div class="counts" id="counts"></div>
+            <button class="review-btn" id="review-btn" data-action="review"></button>
+            <div class="review-actions">
+              <button data-action="reanalyze" id="reanalyze-btn" title="Run Claude's review again">↻</button>
+            </div>
+            <div class="nav">
+              <button data-go="first" title="First move (Home)">⏮</button>
+              <button data-go="prev" title="Previous move (←)">❮</button>
+              <button data-go="play" id="play-btn" title="Play (Space)">▶</button>
+              <button data-go="next" title="Next move (→)">❯</button>
+              <button data-go="last" title="Last move (End)">⏭</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>`;
+
+  const boardEl = document.getElementById('board');
+  const movesEl = document.getElementById('moves');
+  const analysisEl = document.getElementById('analysis');
+  let ply = 0;
+  let flipped = false;
+
+  // Claude's prose mentions moves as "16.Bd2", "16...g4", "...g4" or "Qxc2#".
+  // Show each as a monospace badge; a numbered move that matches the game
+  // links to that position. Bare squares ("d2") get a lighter style, since in
+  // prose they're usually squares, not pawn moves.
+  const SAN = String.raw`(?:O-O(?:-O)?|[KQRBN][a-h]?[1-8]?x?[a-h][1-8]|[a-h]x[a-h][1-8](?:=[QRBN])?|[a-h][1-8](?:=[QRBN])?)[+#]?[!?]{0,2}`;
+  const MOVE_RE = new RegExp(String.raw`(?<![\w.])(?:(\d+)(\.\.\.|\.) ?|(\.\.\.))?(${SAN})(?!\w)`, 'g');
+  const bareSan = (san) => san.replace(/[+#!?]+$/, '');
+
+  function formatMoves(text, { line = false } = {}) {
+    return esc(text).replace(MOVE_RE, (m, num, dots, ellipsis, san) => {
+      if (!line && !num && !ellipsis && /^[a-h][1-8]$/.test(san)) return `<span class="sqb">${m}</span>`;
+      let link = '';
+      if (num) {
+        const p = (Number(num) - 1) * 2 + (dots === '.' ? 1 : 2);
+        if (moves[p - 1] && bareSan(moves[p - 1].san) === bareSan(san)) link = ` data-ply="${p}" title="Show this position"`;
+      }
+      return `<span class="mvb"${link}>${m.replace(' ', '')}</span>`;
+    });
+  }
+
+  const alternativeHtml = (alt) => `<div class="alt"><div class="alt-head">Best was <span class="mvb mvb-best">${esc(alt.move)}</span></div>`
+    + `<p>${formatMoves(alt.why)}</p><div class="alt-line"><span class="label">Line</span>${formatMoves(alt.line, { line: true })}</div></div>`;
+  const tagHtml = (tag) => (tag ? `<span class="tag tag-${esc(tag)}">${esc(tag)}</span>` : '');
+  const moveLabel = (i) => `${Math.floor(i / 2) + 1}${i % 2 ? '...' : '.'} ${moves[i].san}`;
+
+  const maxSpent = Math.max(1, ...spent.filter(Number.isFinite));
+  const timeBar = (j) => (Number.isFinite(spent[j])
+    ? `<span class="bar ${j % 2 ? 'b' : 'w'}" style="width:${Math.max(2, Math.round((spent[j] / maxSpent) * 40))}px"></span>`
+    : '');
+
+  // Rebuilt only when the analysis (and so the classification icons) changes.
+  function renderMoveList() {
+    let html = '';
+    for (let i = 0; i < moves.length; i += 2) {
+      const cell = (j) => {
+        if (j >= moves.length) return '<span></span>';
+        const tag = notes.get(j + 1)?.tag;
+        return `<span class="mv" data-ply="${j + 1}">${tag ? clsIcon(tag) : ''}${figurineSan(moves[j].san, j % 2 ? 'b' : 'w')}</span>`;
+      };
+      const title = [i, i + 1].filter((j) => Number.isFinite(spent[j])).map((j) => `${j % 2 ? 'Black' : 'White'}: ${formatSeconds(spent[j])}`).join(' · ');
+      html += `<div class="row"><span class="num">${i / 2 + 1}.</span>${cell(i)}${cell(i + 1)}`
+        + `<span class="times" title="${esc(title)}">${timeBar(i)}${timeBar(i + 1)}</span></div>`;
+    }
+    html += `<div class="result-row">${esc(game.result)}</div>`;
+    movesEl.innerHTML = html;
+    renderCounts();
+  }
+
+  function renderCounts() {
+    const counts = {};
+    for (const n of notes.values()) if (n.tag) counts[n.tag] = (counts[n.tag] || 0) + 1;
+    document.getElementById('counts').innerHTML = Object.keys(CLASSES).filter((t) => counts[t])
+      .map((t) => `<span class="count" style="color:var(--${t})">${clsIcon(t)}${counts[t]} ${CLASSES[t].label(counts[t])}</span>`).join('');
+  }
+
+  function renderReviewButtons() {
+    const btn = document.getElementById('review-btn');
+    btn.disabled = analyzing;
+    btn.innerHTML = analyzing
+      ? '<span class="spinner"></span>Reviewing...'
+      : '<span class="star">★</span>Game Review';
+    btn.title = analysis ? "Show Claude's review" : 'Have Claude review this game';
+    document.getElementById('reanalyze-btn').disabled = analyzing || !analysis;
+  }
+
+  async function runAnalysis() {
+    analyzing = true;
+    analysisError = null;
+    render();
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(id)}/analysis`, { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Server returned ${res.status}`);
+      cached = cacheAnalysis(id, body);
+      analysis = body;
+      notes = new Map(analysis.moves.map((m) => [m.ply, m]));
+      renderMoveList();
+    } catch (err) {
+      analysisError = err.message === 'Failed to fetch'
+        ? 'Could not reach the server. Start it with pnpm dev.'
+        : err.message;
+    } finally {
+      analyzing = false;
+      render();
+    }
+  }
+
+  function renderBoard() {
+    const pos = positions[ply];
+    const last = ply > 0 ? moves[ply - 1] : null;
+    const checkSq = C.inCheck(pos) ? pos.board.indexOf(pos.turn === 'w' ? 'K' : 'k') : -1;
+    let out = '';
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const rank = flipped ? row : 7 - row;
+        const file = flipped ? 7 - col : col;
+        const i = file + 8 * rank;
+        const p = pos.board[i];
+        const cls = ['sq', (file + rank) % 2 ? 'light' : 'dark'];
+        if (last && (i === last.from || i === last.to)) cls.push('hl');
+        if (i === checkSq) cls.push('check');
+        out += `<div class="${cls.join(' ')}" title="${C.squareName(i)}">`
+          + (col === 0 ? `<span class="coord rank">${rank + 1}</span>` : '')
+          + (row === 7 ? `<span class="coord file">${'abcdefgh'[file]}</span>` : '')
+          + (p ? `<span class="piece ${C.colorOf(p)}">${GLYPH[C.typeOf(p)]}︎</span>` : '')
+          + '</div>';
+      }
+    }
+    boardEl.innerHTML = out;
+    const white = withElo(game.white, game.whiteElo), black = withElo(game.black, game.blackElo);
+    const [topName, bottomName] = flipped ? [white, black] : [black, white];
+    const atEnd = ply === moves.length;
+    document.getElementById('top').innerHTML = `<span>${topName}</span>`;
+    document.getElementById('bottom').innerHTML = `<span>${bottomName}</span><span class="result">${atEnd ? esc(game.result) : ''}</span>`;
+  }
+
+  function renderAnalysis() {
+    if (analyzing) {
+      analysisEl.innerHTML = `<h2>Analysis</h2><p class="muted"><span class="spinner"></span>Claude is analyzing the game. This takes a minute or two.</p>`;
+      return;
+    }
+    if (!analysis) {
+      analysisEl.innerHTML = `<h2>Analysis</h2>`
+        + (analysisError ? `<p class="error">${esc(analysisError)}</p>` : '')
+        + '<p class="muted">Click <b>Game Review</b> to have Claude comment on every move and point out mistakes and better alternatives.</p>';
+      return;
+    }
+    const saved = new Date(cached.savedAt);
+    const footer = `<p class="cache-note">Saved ${esc(saved.toLocaleDateString())} · kept in this browser for 7 days · `
+      + `<a href="#" data-action="reanalyze">Re-analyze</a></p>`;
+    const summary = `<h2>Summary</h2>${analysis.summary.split(/\n+/).map((p) => `<p>${formatMoves(p)}</p>`).join('')}`
+      + `<h2>Key moments</h2><ul class="moments">${analysis.keyMoments.map((k) => `<li data-ply="${k.ply}">`
+        + `<span class="mvb">${esc(moves[k.ply - 1] ? moveLabel(k.ply - 1).replace(' ', '') : 'ply ' + k.ply)}</span>`
+        + `<span>${formatMoves(k.comment)}</span></li>`).join('')}</ul>`;
+    if (ply === 0) { analysisEl.innerHTML = summary + footer; return; }
+    const note = notes.get(ply);
+    analysisEl.innerHTML = `<h2><span class="mvb mvb-lg">${esc(moveLabel(ply - 1).replace(' ', ''))}</span> ${tagHtml(note?.tag)}</h2>`
+      + `<p>${note ? formatMoves(note.comment) : '<span class="muted">No comment for this move.</span>'}</p>`
+      + (note?.bestAlternative ? alternativeHtml(note.bestAlternative) : '')
+      + (ply === moves.length ? summary + footer : '');
+  }
+
+  function render() {
+    renderBoard();
+    renderAnalysis();
+    renderReviewButtons();
+    movesEl.querySelectorAll('.mv.current').forEach((el) => el.classList.remove('current'));
+    const cur = movesEl.querySelector(`.mv[data-ply="${ply}"]`);
+    if (cur) {
+      cur.classList.add('current');
+      cur.scrollIntoView({ block: 'nearest' });
+    } else if (ply === 0) {
+      movesEl.scrollTop = 0;
+    }
+  }
+
+  let playTimer = null;
+  function stopPlaying() {
+    clearInterval(playTimer);
+    playTimer = null;
+    document.getElementById('play-btn').textContent = '▶';
+  }
+  function startPlaying() {
+    if (ply === moves.length) ply = 0;
+    document.getElementById('play-btn').textContent = '❚❚';
+    playTimer = setInterval(() => {
+      if (ply >= moves.length) return stopPlaying();
+      ply++;
+      render();
+    }, 1000);
+    render();
+  }
+
+  function go(action) {
+    if (action === 'play') return playTimer ? stopPlaying() : startPlaying();
+    if (['first', 'prev', 'next', 'last'].includes(action)) stopPlaying();
+    if (action === 'first') ply = 0;
+    else if (action === 'prev') ply = Math.max(0, ply - 1);
+    else if (action === 'next') ply = Math.min(moves.length, ply + 1);
+    else if (action === 'last') ply = moves.length;
+    else if (action === 'flip') flipped = !flipped;
+    else if (action === 'fullscreen') {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen?.().catch(() => {});
+      return;
+    }
+    render();
+  }
+
+  app.querySelector('main').addEventListener('click', (e) => {
+    const nav = e.target.closest('[data-go]');
+    if (nav) return go(nav.dataset.go);
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (action) {
+      e.preventDefault();
+      if (action === 'review' && analysis) {
+        stopPlaying();
+        ply = 0; // the summary shows at the start of the game
+        render();
+      } else if ((action === 'review' || action === 'reanalyze') && !analyzing) {
+        runAnalysis();
+      }
+      return;
+    }
+    const target = e.target.closest('[data-ply]');
+    if (target && (movesEl.contains(target) || analysisEl.contains(target))) {
+      stopPlaying();
+      ply = Number(target.dataset.ply);
+      render();
+    }
+  });
+  wireLoadForms(app);
+  document.addEventListener('keydown', (e) => {
+    if (e.target.closest?.('input, textarea')) return;
+    const key = { ArrowLeft: 'prev', ArrowRight: 'next', Home: 'first', End: 'last', f: 'flip', F: 'flip', ' ': 'play' }[e.key];
+    if (key && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); go(key); }
+  });
+
+  renderMoveList();
+  render();
+}
+
+const id = new URLSearchParams(location.search).get('game');
+if (id && /^\d+$/.test(id)) showGame(id);
+else showGameList();
+</script>
+</body>
+</html>
