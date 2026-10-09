@@ -570,7 +570,7 @@ async function showGame(id) {
     if (!analysis) {
       analysisEl.innerHTML = `<h2>Analysis</h2>`
         + (analysisError ? `<p class="error">${esc(analysisError)}</p>` : '')
-        + '<p class="muted">Click <b>Game Review</b> to have Claude comment on every move and point out mistakes and better alternatives.</p>';
+        + '<p class="muted">Click <b>Game Review</b> to have Claude comment on the key moves, point out mistakes and suggest better alternatives.</p>';
       return;
     }
     const saved = new Date(cached.savedAt);
@@ -666,6 +666,15 @@ async function showGame(id) {
 
   renderMoveList();
   render();
+
+  // An analysis started before a reload is still running on the server;
+  // rejoin it instead of showing the idle button.
+  if (!analysis) {
+    fetch(`/api/games/${encodeURIComponent(id)}/analysis`)
+      .then((res) => res.json())
+      .then(({ running }) => { if (running && !analyzing) runAnalysis(); })
+      .catch(() => {});
+  }
 }
 
 const id = new URLSearchParams(location.search).get('game');

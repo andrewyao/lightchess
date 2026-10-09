@@ -3,6 +3,7 @@
 // on demand. Binds to 127.0.0.1 only, since the API spends your Claude usage.
 //
 //   POST /api/games {game}          ->  {id}; downloads the game if needed
+//   GET  /api/games/<id>/analysis  ->  {running}; whether an analysis is in flight
 //   POST /api/games/<id>/analysis  ->  analysis JSON (takes a minute or two)
 'use strict';
 const http = require('http');
@@ -113,15 +114,19 @@ function serveStatic(res, urlPath) {
 const server = http.createServer((req, res) => {
   const { pathname } = new URL(req.url, `http://${req.headers.host}`);
   if (pathname.startsWith('/api/')) {
-    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Use POST' });
     // Other sites open in the browser can POST to localhost too; only accept
     // calls from this app's own pages (also blocks DNS-rebinding hosts).
+    // Same-origin GETs carry no Origin header, and CORS keeps other sites
+    // from reading GET responses, so GETs only need the Host check.
     const self = [`http://${HOST}:${PORT}`, `http://localhost:${PORT}`];
-    if (!self.includes(`http://${req.headers.host}`) || !self.includes(req.headers.origin)) {
+    const isGet = req.method === 'GET';
+    if (!self.includes(`http://${req.headers.host}`) || (!isGet && !self.includes(req.headers.origin))) {
       return sendJson(res, 403, { error: 'Forbidden' });
     }
-    if (pathname === '/api/games') return handleLoadGame(req, res);
     const analysis = pathname.match(/^\/api\/games\/(\d+)\/analysis$/);
+    if (isGet && analysis) return sendJson(res, 200, { running: inFlight.has(analysis[1]) });
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Use GET or POST' });
+    if (pathname === '/api/games') return handleLoadGame(req, res);
     if (analysis) return handleAnalysis(res, analysis[1]);
     return sendJson(res, 404, { error: 'Not found' });
   }
